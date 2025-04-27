@@ -100,30 +100,6 @@ T deserialize(Buffer::const_iterator &_begin, Buffer::const_iterator _end) {
   return value;
 }
 
-template <>
-std::string deserialize(Buffer::const_iterator &_begin,
-                        Buffer::const_iterator _end) {
-  const uint64_t size = deserialize<uint64_t>(_begin, _end);
-  if (size == 0) {
-    return "";
-  }
-
-  if (std::distance(_begin, _end) < static_cast<std::ptrdiff_t>(size)) {
-    throw std::runtime_error("Not enough data to deserialize string");
-  }
-
-  std::string value;
-  value.resize(size);
-  memcpy(value.data(), &*_begin, size);
-  _begin += size;
-  //   std::cout << "string: ";
-  //   for (unsigned char c : value) {
-  //     std::cout << "\\0x" << std::hex << static_cast<int>(c);
-  //   }
-  //   std::cout << std::dec << std::endl;
-  return value;
-}
-
 } // namespace tools
 
 class IntegerType {
@@ -240,6 +216,8 @@ public:
     }
   }
 
+  void serialize(Buffer &_buff) const {}
+
   Buffer::const_iterator deserialize(Buffer::const_iterator _begin,
                                      Buffer::const_iterator _end) {
 
@@ -253,9 +231,21 @@ public:
     case TypeId::Float:
       _value = tools::deserialize<double>(_begin, _end);
       break;
-    case TypeId::String:
-      _value = tools::deserialize<std::string>(_begin, _end);
+    case TypeId::String: {
+      const uint64_t size = tools::deserialize<uint64_t>(_begin, _end);
+      std::string value;
+      value.reserve(size);
+      for (uint64_t i = 0; i < size; ++i) {
+        value += tools::deserialize<char>(_begin, _end);
+      }
+      _value = value;
+      //   std::cout << "string: ";
+      //   for (unsigned char c : value) {
+      //     std::cout << "\\0x" << std::hex << static_cast<int>(c);
+      //   }
+      //   std::cout << std::dec << std::endl;
       break;
+    }
     case TypeId::Vector: {
       const uint64_t size = tools::deserialize<uint64_t>(_begin, _end);
       std::vector<Any> value;
@@ -314,12 +304,18 @@ public:
 
   Buffer serialize() const {
     Buffer buffer;
+    // tools::serialize<uint64_t>(buffer, storage_.size());
+
+    for (const auto &el : storage_) {
+      el.serialize(buffer);
+    }
+
     return buffer;
   }
 
   static std::vector<Any> deserialize(const Buffer &_val) {
     Buffer::const_iterator it = _val.begin();
-    uint64_t size = tools::deserialize<uint64_t>(it, _val.end());
+    const uint64_t size = tools::deserialize<uint64_t>(it, _val.end());
 
     std::vector<Any> result;
     result.reserve(size);
@@ -373,7 +369,7 @@ int main() {
   //   VectorType vec = getSerializationTest();
   Buffer buff(size);
   raw.read(reinterpret_cast<char *>(buff.data()), size);
-  // buff = getDeserializationTest();
+  //   buff = getDeserializationTest();
   auto res = Serializator::deserialize(buff);
   Serializator s;
   for (auto &&i : res)
