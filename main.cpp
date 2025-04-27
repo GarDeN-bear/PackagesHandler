@@ -203,36 +203,41 @@ private:
 };
 
 class Any {
+private:
+  template <typename T>
+  using allowed_types =
+      std::disjunction<std::is_same<std::decay_t<T>, uint64_t>,
+                       std::is_same<std::decay_t<T>, double>,
+                       std::is_same<std::decay_t<T>, std::string>,
+                       std::is_same<std::decay_t<T>, std::vector<Any>>,
+                       std::is_same<std::decay_t<T>, IntegerType>,
+                       std::is_same<std::decay_t<T>, FloatType>,
+                       std::is_same<std::decay_t<T>, StringType>,
+                       std::is_same<std::decay_t<T>, VectorType>>;
+
 public:
   Any() : _typeId(TypeId::Uint), _value(uint64_t{0}) {}
   template <typename... Args,
-            typename = std::enable_if_t<(sizeof...(Args) >= 1)>>
+            typename = std::enable_if_t<sizeof...(Args) >= 1 &&
+                                        ((allowed_types<Args>::value && ...))>>
   Any(Args &&...args) {
     if constexpr (sizeof...(Args) == 1) {
       auto &&first = std::get<0>(std::forward_as_tuple(args...));
       using DecayedType = std::decay_t<decltype(first)>;
-      if constexpr (std::is_same_v<DecayedType, uint64_t>) {
-        _typeId = TypeId::Uint;
-        _value = std::forward<decltype(first)>(first);
-      } else if constexpr (std::is_same_v<DecayedType, double>) {
-        _typeId = TypeId::Float;
-        _value = std::forward<decltype(first)>(first);
-      } else if constexpr (std::is_same_v<DecayedType, std::string>) {
-        _typeId = TypeId::String;
-        _value = std::forward<decltype(first)>(first);
-      } else if constexpr (std::is_same_v<DecayedType, std::vector<Any>>) {
-        _typeId = TypeId::Vector;
-        _value = std::forward<decltype(first)>(first);
-      } else if constexpr (std::is_same_v<DecayedType, IntegerType>) {
+      if constexpr ((std::is_same_v<DecayedType, uint64_t>) ||
+                    (std::is_same_v<DecayedType, FloatType>)) {
         _typeId = TypeId::Uint;
         _value = static_cast<uint64_t>(first);
-      } else if constexpr (std::is_same_v<DecayedType, FloatType>) {
+      } else if constexpr ((std::is_same_v<DecayedType, double>) ||
+                           (std::is_same_v<DecayedType, FloatType>)) {
         _typeId = TypeId::Float;
         _value = static_cast<double>(first);
-      } else if constexpr (std::is_same_v<DecayedType, StringType>) {
+      } else if constexpr ((std::is_same_v<DecayedType, std::string>) ||
+                           (std::is_same_v<DecayedType, StringType>)) {
         _typeId = TypeId::String;
         _value = static_cast<std::string>(first);
-      } else if constexpr (std::is_same_v<DecayedType, VectorType>) {
+      } else if constexpr ((std::is_same_v<DecayedType, std::vector<Any>>) ||
+                           (std::is_same_v<DecayedType, VectorType>)) {
         _typeId = TypeId::Vector;
         _value = static_cast<std::vector<Any>>(first);
       } else {
