@@ -129,11 +129,9 @@ std::string deserialize(Buffer::const_iterator &_begin,
 class IntegerType {
 
 public:
-  template <typename... Args>
-  IntegerType(Args &&...args) : _value(std::forward<Args>(args)...) {
-    static_assert(std::is_constructible_v<uint64_t, Args...>,
-                  "IntegerType must be constructible from uint64_t");
-  }
+  template <typename... Args, typename = std::enable_if_t<
+                                  std::is_constructible_v<uint64_t, Args...>>>
+  IntegerType(Args &&...args) : _value(std::forward<Args>(args)...) {}
 
   bool operator==(const IntegerType &_o) const { return _value == _o._value; }
   operator uint64_t() const { return _value; }
@@ -145,11 +143,9 @@ private:
 class FloatType {
 
 public:
-  template <typename... Args>
-  FloatType(Args &&...args) : _value(std::forward<Args>(args)...) {
-    static_assert(std::is_constructible_v<double, Args...>,
-                  "FloatType must be constructible from double");
-  }
+  template <typename... Args, typename = std::enable_if_t<
+                                  std::is_constructible_v<double, Args...>>>
+  FloatType(Args &&...args) : _value(std::forward<Args>(args)...) {}
 
   bool operator==(const FloatType &_o) const { return _value == _o._value; }
   operator double() const { return _value; }
@@ -161,11 +157,10 @@ private:
 class StringType {
 
 public:
-  template <typename... Args>
-  StringType(Args &&...args) : _value(std::forward<Args>(args)...) {
-    static_assert(std::is_constructible_v<std::string, Args...>,
-                  "StringType must be constructible from string");
-  }
+  template <typename... Args,
+            typename =
+                std::enable_if_t<std::is_constructible_v<std::string, Args...>>>
+  StringType(Args &&...args) : _value(std::forward<Args>(args)...) {}
 
   bool operator==(const StringType &_o) const { return _value == _o._value; }
   operator std::string() const { return _value; }
@@ -180,13 +175,15 @@ class Any;
 
 class VectorType {
 public:
-  template <typename... Args> VectorType(Args &&...args) {
+  template <typename... Args, typename = std::enable_if_t<
+                                  (std::is_constructible_v<Any, Args> && ...)>>
+  VectorType(Args &&...args) {
     (push_back(std::forward<Args>(args)), ...);
   }
 
-  template <typename Arg> void push_back(Arg &&_val) {
-    static_assert(std::is_constructible_v<Any, Arg>,
-                  "StringType must be constructible from Any");
+  template <typename Arg,
+            typename = std::enable_if_t<std::is_constructible_v<Any, Arg>>>
+  void push_back(Arg &&_val) {
     _value.emplace_back(std::forward<Arg>(_val));
   }
 
@@ -203,11 +200,10 @@ private:
 class Any {
 public:
   Any() : _typeId(TypeId::Uint), _value(uint64_t{0}) {}
-  template <typename... Args> Any(Args &&...args) {
-    if constexpr (sizeof...(Args) == 0) {
-      _typeId = TypeId::Uint;
-      _value = uint64_t{0};
-    } else if constexpr (sizeof...(Args) == 1) {
+  template <typename... Args,
+            typename = std::enable_if_t<(sizeof...(Args) >= 1)>>
+  Any(Args &&...args) {
+    if constexpr (sizeof...(Args) == 1) {
       auto &&first = std::get<0>(std::forward_as_tuple(args...));
       using DecayedType = std::decay_t<decltype(first)>;
       if constexpr (std::is_same_v<DecayedType, uint64_t>) {
@@ -306,7 +302,13 @@ private:
 
 class Serializator {
 public:
-  template <typename Arg> void push(Arg &&_val) {
+  template <typename Arg, typename = std::enable_if_t<std::disjunction_v<
+                              std::is_same<std::decay_t<Arg>, IntegerType>,
+                              std::is_same<std::decay_t<Arg>, FloatType>,
+                              std::is_same<std::decay_t<Arg>, StringType>,
+                              std::is_same<std::decay_t<Arg>, VectorType>,
+                              std::is_same<std::decay_t<Arg>, Any>>>>
+  void push(Arg &&_val) {
     storage_.emplace_back(std::forward<Arg>(_val));
   }
 
