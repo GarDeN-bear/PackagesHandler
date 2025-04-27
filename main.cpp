@@ -156,6 +156,11 @@ private:
   std::string _value;
 };
 
+std::ostream &operator<<(std::ostream &os, const StringType &str) {
+  os << static_cast<std::string>(str);
+  return os;
+}
+
 class Any;
 
 class VectorType {
