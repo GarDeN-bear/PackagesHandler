@@ -72,6 +72,7 @@ StringType, VectorType, Any Реализация всех шаблонных ф�
 
 #include <boost/type_index.hpp>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory.h>
 #include <tuple>
@@ -85,7 +86,35 @@ enum class TypeId : Id { Uint, Float, String, Vector };
 
 namespace tools {
 
-template <typename T>
+void printByte(const std::byte *byte) {
+  std::cout << "\\0x" << std::hex << std::setw(2) << std::setfill('0')
+            << static_cast<unsigned>(*byte) << ' ';
+}
+
+void printBuffer(const Buffer &buffer) {
+  std::cout << "{ ";
+  for (size_t i = 0; i < buffer.size(); ++i) {
+    if (!(i % 8)) {
+      std::cout << "\n ";
+    }
+    printByte(&buffer[i]);
+  }
+  std::cout << "\n}";
+  std::cout << std::dec << std::endl;
+}
+
+template <typename T, typename = std::enable_if_t<std::is_same_v<T, uint64_t> ||
+                                                  std::is_same_v<T, double> ||
+                                                  std::is_same_v<T, char>>>
+void serialize(Buffer &buffer, const T &value) {
+  const std::byte *bytes = reinterpret_cast<const std::byte *>(&value);
+  buffer.insert(buffer.end(), bytes, bytes + sizeof(T));
+  //   printBuffer(Buffer(buffer.end() - sizeof(T), buffer.end()));
+}
+
+template <typename T, typename = std::enable_if_t<std::is_same_v<T, uint64_t> ||
+                                                  std::is_same_v<T, double> ||
+                                                  std::is_same_v<T, char>>>
 T deserialize(Buffer::const_iterator &_begin, Buffer::const_iterator _end) {
   if (std::distance(_begin, _end) < static_cast<std::ptrdiff_t>(sizeof(T))) {
     throw std::runtime_error("Not enough data to deserialize " +
@@ -216,7 +245,34 @@ public:
     }
   }
 
-  void serialize(Buffer &_buff) const {}
+  void serialize(Buffer &_buff) const {
+    tools::serialize<uint64_t>(_buff, static_cast<Id>(_typeId));
+
+    switch (_typeId) {
+    case TypeId::Uint:
+      tools::serialize<uint64_t>(_buff, std::get<uint64_t>(_value));
+      break;
+    case TypeId::Float:
+      tools::serialize<double>(_buff, std::get<double>(_value));
+      break;
+    case TypeId::String: {
+      const auto &value = std::get<std::string>(_value);
+      tools::serialize<uint64_t>(_buff, value.size());
+      for (const auto &item : value) {
+        tools::serialize<char>(_buff, item);
+      }
+      break;
+    }
+    case TypeId::Vector: {
+      const auto &value = std::get<std::vector<Any>>(_value);
+      tools::serialize<uint64_t>(_buff, value.size());
+      for (const auto &item : value) {
+        item.serialize(_buff);
+      }
+      break;
+    }
+    }
+  }
 
   Buffer::const_iterator deserialize(Buffer::const_iterator _begin,
                                      Buffer::const_iterator _end) {
@@ -299,15 +355,15 @@ public:
                               std::is_same<std::decay_t<Arg>, VectorType>,
                               std::is_same<std::decay_t<Arg>, Any>>>>
   void push(Arg &&_val) {
-    storage_.emplace_back(std::forward<Arg>(_val));
+    storage_.push_back(std::forward<Arg>(_val));
   }
 
   Buffer serialize() const {
     Buffer buffer;
-    // tools::serialize<uint64_t>(buffer, storage_.size());
+    tools::serialize<uint64_t>(buffer, storage_.size());
 
-    for (const auto &el : storage_) {
-      el.serialize(buffer);
+    for (const auto &item : storage_) {
+      item.serialize(buffer);
     }
 
     return buffer;
@@ -316,7 +372,6 @@ public:
   static std::vector<Any> deserialize(const Buffer &_val) {
     Buffer::const_iterator it = _val.begin();
     const uint64_t size = tools::deserialize<uint64_t>(it, _val.end());
-
     std::vector<Any> result;
     result.reserve(size);
 
@@ -334,6 +389,8 @@ public:
 private:
   std::vector<Any> storage_;
 };
+
+namespace tests {
 
 Buffer getDeserializationTest() {
   return {std::byte{0x01}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
@@ -358,6 +415,8 @@ VectorType getSerializationTest() {
   return VectorType(StringType("qwerty"), IntegerType(100500));
 }
 
+} // namespace tests
+
 int main() {
   std::ifstream raw;
   raw.open("raw.bin", std::ios_base::in | std::ios_base::binary);
@@ -366,16 +425,18 @@ int main() {
   raw.seekg(0, std::ios_base::end);
   std::streamsize size = raw.tellg();
   raw.seekg(0, std::ios_base::beg);
-  //   VectorType vec = getSerializationTest();
   Buffer buff(size);
   raw.read(reinterpret_cast<char *>(buff.data()), size);
-  //   buff = getDeserializationTest();
+  //   buff = tests::getDeserializationTest();
   auto res = Serializator::deserialize(buff);
   Serializator s;
+
   for (auto &&i : res)
     s.push(i);
-
+  //   VectorType vec = tests::getSerializationTest();
+  //   s.push(vec);
+  //   buff = s.serialize();
+  //   tools::printBuffer(buff);
   std::cout << (buff == s.serialize()) << '\n';
-
   return 0;
 }
