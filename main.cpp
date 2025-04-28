@@ -70,7 +70,6 @@ StringType, VectorType, Any Реализация всех шаблонных ф�
  0x01,0x00,0x00,0x00,0x00,0x00}
 */
 
-#include <boost/type_index.hpp>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -99,8 +98,7 @@ template <typename T, typename = std::enable_if_t<std::is_same_v<T, uint64_t> ||
                                                   std::is_same_v<T, char>>>
 T deserialize(Buffer::const_iterator &_begin, Buffer::const_iterator _end) {
   if (std::distance(_begin, _end) < static_cast<std::ptrdiff_t>(sizeof(T))) {
-    throw std::runtime_error("Not enough data to deserialize " +
-                             boost::typeindex::type_id<T>().pretty_name());
+    throw std::runtime_error("Not enough data to deserialize");
   }
 
   T value;
