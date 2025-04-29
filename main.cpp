@@ -109,49 +109,62 @@ T deserialize(Buffer::const_iterator &_begin, Buffer::const_iterator _end) {
 
 } // namespace tools
 
-class IntegerType {
+template <typename T, TypeId TypeID> class ValueHolder {
+public:
+  operator T() const { return _value; }
+
+  void serialize(Buffer &buffer) const {
+    tools::serialize<uint64_t>(buffer, static_cast<Id>(TypeID));
+    tools::serialize<T>(buffer, _value);
+  }
+
+  Buffer::const_iterator deserialize(Buffer::const_iterator begin,
+                                     Buffer::const_iterator end) {
+    _value = tools::deserialize<T>(begin, end);
+    return begin;
+  }
+
+protected:
+  template <typename... Args>
+  ValueHolder(Args &&...args) : _value(std::forward<Args>(args)...) {}
+
+  T _value;
+};
+
+class IntegerType : public ValueHolder<uint64_t, TypeId::Uint> {
 
 public:
   template <typename... Args, typename = std::enable_if_t<
                                   std::is_constructible_v<uint64_t, Args...>>>
-  IntegerType(Args &&...args) : _value(std::forward<Args>(args)...) {}
+  IntegerType(Args &&...args)
+      : ValueHolder<uint64_t, TypeId::Uint>(std::forward<Args>(args)...) {}
 
   bool operator==(const IntegerType &_o) const { return _value == _o._value; }
-  operator uint64_t() const { return _value; }
-
-private:
-  uint64_t _value;
 };
 
-class FloatType {
+class FloatType : public ValueHolder<double, TypeId::Float> {
 
 public:
   template <typename... Args, typename = std::enable_if_t<
                                   std::is_constructible_v<double, Args...>>>
-  FloatType(Args &&...args) : _value(std::forward<Args>(args)...) {}
+  FloatType(Args &&...args)
+      : ValueHolder<double, TypeId::Float>(std::forward<Args>(args)...) {}
 
   bool operator==(const FloatType &_o) const { return _value == _o._value; }
-  operator double() const { return _value; }
-
-private:
-  double _value;
 };
 
-class StringType {
+class StringType : public ValueHolder<std::string, TypeId::String> {
 
 public:
   template <typename... Args,
             typename =
                 std::enable_if_t<std::is_constructible_v<std::string, Args...>>>
-  StringType(Args &&...args) : _value(std::forward<Args>(args)...) {}
+  StringType(Args &&...args)
+      : ValueHolder<std::string, TypeId::String>(std::forward<Args>(args)...) {}
 
   bool operator==(const StringType &_o) const { return _value == _o._value; }
-  operator std::string() const { return _value; }
   const char &operator[](size_t pos) const { return _value.at(pos); }
   char &operator[](size_t pos) { return _value.at(pos); }
-
-private:
-  std::string _value;
 };
 
 std::ostream &operator<<(std::ostream &os, const StringType &str) {
@@ -161,13 +174,13 @@ std::ostream &operator<<(std::ostream &os, const StringType &str) {
 
 class Any;
 
-class VectorType {
+class VectorType : public ValueHolder<std::vector<Any>, TypeId::Vector> {
 public:
   template <typename... Args, typename = std::enable_if_t<
                                   (std::is_constructible_v<Any, Args> && ...)>>
-  VectorType(Args &&...args) {
-    (push_back(std::forward<Args>(args)), ...);
-  }
+  VectorType(Args &&...args)
+      : ValueHolder<std::vector<Any>, TypeId::Vector>(
+            std::forward<Args>(args)...) {}
 
   template <typename Arg,
             typename = std::enable_if_t<std::is_constructible_v<Any, Arg>>>
@@ -177,12 +190,8 @@ public:
 
   size_t size() const { return _value.size(); }
   bool operator==(const VectorType &_o) const { return _value == _o._value; }
-  operator std::vector<Any>() const { return _value; }
   const Any &operator[](size_t index) const { return _value.at(index); }
   Any &operator[](size_t index) { return _value.at(index); }
-
-private:
-  std::vector<Any> _value;
 };
 
 class Any {
