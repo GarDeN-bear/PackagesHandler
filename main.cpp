@@ -113,15 +113,15 @@ template <typename T, TypeId TypeID> class ValueHolder {
 public:
   operator T() const { return _value; }
 
-  void serialize(Buffer &buffer) const {
-    tools::serialize<uint64_t>(buffer, static_cast<Id>(TypeID));
-    tools::serialize<T>(buffer, _value);
+  void serialize(Buffer &_buff) const {
+    tools::serialize<uint64_t>(_buff, static_cast<Id>(TypeID));
+    tools::serialize<T>(_buff, _value);
   }
 
-  Buffer::const_iterator deserialize(Buffer::const_iterator begin,
-                                     Buffer::const_iterator end) {
-    _value = tools::deserialize<T>(begin, end);
-    return begin;
+  Buffer::const_iterator deserialize(Buffer::const_iterator _begin,
+                                     Buffer::const_iterator _end) {
+    _value = tools::deserialize<T>(_begin, _end);
+    return _begin;
   }
 
 protected:
@@ -162,6 +162,25 @@ public:
   StringType(Args &&...args)
       : ValueHolder<std::string, TypeId::String>(std::forward<Args>(args)...) {}
 
+  void serialize(Buffer &_buff) const {
+    tools::serialize<uint64_t>(_buff, static_cast<Id>(TypeId::String));
+    tools::serialize<uint64_t>(_buff, _value.size());
+    for (const auto &item : _value) {
+      tools::serialize<char>(_buff, item);
+    }
+  }
+
+  Buffer::const_iterator deserialize(Buffer::const_iterator _begin,
+                                     Buffer::const_iterator _end) {
+    const uint64_t size = tools::deserialize<uint64_t>(_begin, _end);
+    _value.clear();
+    _value.reserve(size);
+    for (uint64_t i = 0; i < size; ++i) {
+      _value += tools::deserialize<char>(_begin, _end);
+    }
+    return _begin;
+  }
+
   bool operator==(const StringType &_o) const { return _value == _o._value; }
   const char &operator[](size_t pos) const { return _value.at(pos); }
   char &operator[](size_t pos) { return _value.at(pos); }
@@ -172,27 +191,7 @@ std::ostream &operator<<(std::ostream &os, const StringType &str) {
   return os;
 }
 
-class Any;
-
-class VectorType : public ValueHolder<std::vector<Any>, TypeId::Vector> {
-public:
-  template <typename... Args, typename = std::enable_if_t<
-                                  (std::is_constructible_v<Any, Args> && ...)>>
-  VectorType(Args &&...args)
-      : ValueHolder<std::vector<Any>, TypeId::Vector>(
-            std::forward<Args>(args)...) {}
-
-  template <typename Arg,
-            typename = std::enable_if_t<std::is_constructible_v<Any, Arg>>>
-  void push_back(Arg &&_val) {
-    _value.emplace_back(std::forward<Arg>(_val));
-  }
-
-  size_t size() const { return _value.size(); }
-  bool operator==(const VectorType &_o) const { return _value == _o._value; }
-  const Any &operator[](size_t index) const { return _value.at(index); }
-  Any &operator[](size_t index) { return _value.at(index); }
-};
+class VectorType;
 
 class Any {
 private:
@@ -243,24 +242,26 @@ public:
   }
 
   void serialize(Buffer &_buff) const {
-    tools::serialize<uint64_t>(_buff, static_cast<Id>(_typeId));
 
     switch (_typeId) {
-    case TypeId::Uint:
-      tools::serialize<uint64_t>(_buff, std::get<uint64_t>(_value));
+    case TypeId::Uint: {
+      IntegerType value = std::get<uint64_t>(_value);
+      value.serialize(_buff);
       break;
-    case TypeId::Float:
-      tools::serialize<double>(_buff, std::get<double>(_value));
+    }
+    case TypeId::Float: {
+      FloatType value = std::get<double>(_value);
+      value.serialize(_buff);
       break;
+    }
     case TypeId::String: {
-      const auto &value = std::get<std::string>(_value);
-      tools::serialize<uint64_t>(_buff, value.size());
-      for (const auto &item : value) {
-        tools::serialize<char>(_buff, item);
-      }
+      StringType value = std::get<std::string>(_value);
+      value.serialize(_buff);
       break;
     }
     case TypeId::Vector: {
+      tools::serialize<uint64_t>(_buff, static_cast<Id>(_typeId));
+
       const auto &value = std::get<std::vector<Any>>(_value);
       tools::serialize<uint64_t>(_buff, value.size());
       for (const auto &item : value) {
@@ -285,12 +286,8 @@ public:
       _value = tools::deserialize<double>(_begin, _end);
       break;
     case TypeId::String: {
-      const uint64_t size = tools::deserialize<uint64_t>(_begin, _end);
-      std::string value;
-      value.reserve(size);
-      for (uint64_t i = 0; i < size; ++i) {
-        value += tools::deserialize<char>(_begin, _end);
-      }
+      StringType value;
+      _begin = value.deserialize(_begin, _end);
       _value = value;
       break;
     }
@@ -335,6 +332,47 @@ public:
 private:
   std::variant<uint64_t, double, std::string, std::vector<Any>> _value;
   TypeId _typeId;
+};
+
+class VectorType : public ValueHolder<std::vector<Any>, TypeId::Vector> {
+public:
+  template <typename... Args, typename = std::enable_if_t<
+                                  (std::is_constructible_v<Any, Args> && ...)>>
+  VectorType(Args &&...args)
+      : ValueHolder<std::vector<Any>, TypeId::Vector>(
+            std::forward<Args>(args)...) {}
+
+  void serialize(Buffer &_buff) const {
+    tools::serialize<uint64_t>(_buff, static_cast<Id>(TypeId::Vector));
+    tools::serialize<uint64_t>(_buff, _value.size());
+    for (const auto &item : _value) {
+      item.serialize(_buff);
+    }
+  }
+
+  Buffer::const_iterator deserialize(Buffer::const_iterator _begin,
+                                     Buffer::const_iterator _end) {
+    const uint64_t size = tools::deserialize<uint64_t>(_begin, _end);
+    _value.clear();
+    _value.reserve(size);
+    for (uint64_t i = 0; i < size; ++i) {
+      Any item;
+      _begin = item.deserialize(_begin, _end);
+      _value.push_back(item);
+    }
+    return _begin;
+  }
+
+  template <typename Arg,
+            typename = std::enable_if_t<std::is_constructible_v<Any, Arg>>>
+  void push_back(Arg &&_val) {
+    _value.emplace_back(std::forward<Arg>(_val));
+  }
+
+  size_t size() const { return _value.size(); }
+  bool operator==(const VectorType &_o) const { return _value == _o._value; }
+  const Any &operator[](size_t index) const { return _value.at(index); }
+  Any &operator[](size_t index) { return _value.at(index); }
 };
 
 class Serializator {
